@@ -31,50 +31,75 @@ export const createProject = async (req, res) => {
   res.json(project);
 };
 
-/* LIST MY PROJECTS */
+/* LIST PROJECTS */
 export const listProjects = async (req, res) => {
-  // Fetch projects for current user
-  const { data: projectsData, error } = await supabase
-    .from("project_members")
-    .select(`
-      role,
-      projects (
-        id,
-        name,
-        description,
-        owner_id,
-        created_at
-      )
-    `)
-    .eq("user_id", req.user.id);
+  try {
+    let projectsData;
 
-  if (error) return res.status(400).json(error);
+    if (req.user.role === "admin") {
+      // Admin: fetch all projects
+      const { data, error } = await supabase
+        .from("projects")
+        .select(`
+          id,
+          name,
+          description,
+          owner_id,
+          created_at
+        `);
 
-  const projects = await Promise.all(
-    projectsData.map(async (p) => {
-      // fetch members for each project
-      const { data: members } = await supabase
-  .from("project_members")
-  .select(`
-    role,
-    users (
-      id,
-      name,
-      email
-    )
-  `)
-  .eq("project_id", p.projects.id);
+      if (error) return res.status(400).json(error);
 
+      projectsData = data.map(p => ({ projects: p, role: "admin" }));
+    } else {
+      // Regular user: fetch projects where user is a member
+      const { data, error } = await supabase
+        .from("project_members")
+        .select(`
+          role,
+          projects (
+            id,
+            name,
+            description,
+            owner_id,
+            created_at
+          )
+        `)
+        .eq("user_id", req.user.id);
 
-      return {
-        ...p.projects,
-        role: p.role,
-        members: members || [],
-      };
-    })
-  );
+      if (error) return res.status(400).json(error);
 
-  res.json(projects);
+      projectsData = data;
+    }
+
+    // Attach members for each project
+    const projects = await Promise.all(
+      projectsData.map(async (p) => {
+        const { data: members } = await supabase
+          .from("project_members")
+          .select(`
+            role,
+            users (
+              id,
+              name,
+              email
+            )
+          `)
+          .eq("project_id", p.projects.id);
+
+        return {
+          ...p.projects,
+          role: p.role,
+          members: members || [],
+        };
+      })
+    );
+
+    res.json(projects);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 /* UPDATE PROJECT */
